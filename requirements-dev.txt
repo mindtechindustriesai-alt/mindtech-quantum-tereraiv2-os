@@ -1,0 +1,25 @@
+-r requirements.txt
+
+# Development Tools
+ipython>=8.14.0
+jupyter>=1.0.0
+jupyterlab>=4.0.0
+
+# Testing
+pytest-cov>=4.1.0
+pytest-xdist>=3.3.0
+pytest-env>=0.8.0
+
+# Code Quality
+black>=23.0.0
+ruff>=0.0.280
+mypy>=1.5.0
+isort>=5.12.0
+
+# Documentation
+mkdocs>=1.5.0
+mkdocs-material>=9.4.0
+
+# Profiling
+memory-profiler>=0.61.0
+line-profiler>=4.1.0
