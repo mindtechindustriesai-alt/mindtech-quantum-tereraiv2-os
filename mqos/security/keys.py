@@ -1,19 +1,15 @@
-"""
-Key management — OS CSPRNG with rotation and revocation.
-Provides: generate_key, rotate_keys, revoke_key, key_inventory
-"""
+"""Key management — OS CSPRNG with rotation and revocation."""
 
 import os
 import time
 import secrets
 from typing import Dict, Any
 
-_KEY_STATE: Dict[str, Any] = {
+_KEY_STATE: Dict[str, Dict[str, Any]] = {
     "active": {},
     "expired": {},
     "revoked": {},
 }
-
 KEY_ROTATION_DAYS = int(os.environ.get("KEY_ROTATION_DAYS", "30"))
 
 
@@ -40,8 +36,7 @@ def generate_key(length: int = 256, purpose: str = "encryption") -> Dict[str, An
 def rotate_keys(limit: int = 10) -> Dict[str, Any]:
     """Rotate active keys — move oldest to expired, generate fresh."""
     rotated = 0
-    ids = list(_KEY_STATE["active"].keys())[:limit]
-    for key_id in ids:
+    for key_id in list(_KEY_STATE["active"].keys())[:limit]:
         _KEY_STATE["expired"][key_id] = _KEY_STATE["active"].pop(key_id)
         rotated += 1
     return {
@@ -52,7 +47,7 @@ def rotate_keys(limit: int = 10) -> Dict[str, Any]:
 
 
 def revoke_key(key_id: str) -> Dict[str, Any]:
-    """Revoke a key — moves to revoked, never reusable."""
+    """Revoke a key — moves to revoked list, never reusable."""
     if key_id in _KEY_STATE["active"]:
         _KEY_STATE["revoked"][key_id] = _KEY_STATE["active"].pop(key_id)
         return {"success": True, "revoked_key": key_id}
