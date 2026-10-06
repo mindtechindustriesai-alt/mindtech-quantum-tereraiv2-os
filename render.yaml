@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: mindtech-quantum-tereraiv2-os
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: frankfurt
+    autoDeploy: true
+    branch: main
+    healthCheckPath: /health
+    envVars:
+      - key: IBM_QUANTUM_TOKEN
+        sync: false
+      - key: IBM_QUANTUM_CRN
+        sync: false
+      - key: IBM_QUANTUM_BACKEND
+        value: ibm_kingston
+      - key: IBM_QUANTUM_CHANNEL
+        value: ibm_quantum_platform
+      - key: MQOS_SHARED_SECRET
+        sync: false
+      - key: CHSH_CACHE_TTL
+        value: "3600"
+      - key: KEY_ROTATION_DAYS
+        value: "30"
+      - key: ALLOWED_ORIGINS
+        value: "https://khensani-ai.onrender.com,https://luvuno-backend-proxy.onrender.com"
+      - key: PYTHON_VERSION
+        value: "3.11.9"
