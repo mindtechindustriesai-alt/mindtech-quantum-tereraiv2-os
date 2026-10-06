@@ -2,24 +2,21 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc g++ cmake \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential gcc g++ curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir --only-binary :all: -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    (pip install --no-cache-dir --only-binary=:all: qiskit-aer==0.15.1 || \
+     pip install --no-cache-dir qiskit-aer==0.15.1) && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy application
-COPY mqos/ ./mqos/
-COPY dashboard/ ./dashboard/
-COPY scripts/ ./scripts/
+COPY . .
 
-# Create non-root user
-RUN useradd -m -u 1000 mindtech && chown -R mindtech:mindtech /app
-USER mindtech
+EXPOSE 8000
 
-EXPOSE 8000 9090 8501
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["uvicorn", "mqos.api.rest_api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
