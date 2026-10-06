@@ -2,13 +2,16 @@
 mqos/quantum_engine/chsh.py
 Real CHSH verification — IBM Kingston primary, Qiskit Aer fallback.
 Anchored to reference job d8uhvl4bp3hs738628cg (IBM Kingston, S=2.76).
+
+CHSH circuit: |Φ+> Bell state, measurements in rotated bases.
+Optimal angles: a in {0, 45}, b in {22.5, -22.5}.
+Correct rotation: Ry(-2θ).
 """
 
 import os
 import math
 import time
 import uuid
-import base64
 from typing import Dict, Any, List, Optional
 
 from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, transpile
@@ -20,14 +23,12 @@ try:
 except ImportError:
     IBM_RUNTIME_AVAILABLE = False
 
-# Mindtech Industries credentials (fresh runs)
 IBM_TOKEN = os.environ.get("IBM_QUANTUM_TOKEN", "")
 IBM_CRN = os.environ.get("IBM_QUANTUM_CRN", "")
 IBM_BACKEND = os.environ.get("IBM_QUANTUM_BACKEND", "ibm_kingston")
 IBM_CHANNEL = os.environ.get("IBM_QUANTUM_CHANNEL", "ibm_quantum_platform")
 USE_HARDWARE = IBM_RUNTIME_AVAILABLE and bool(IBM_TOKEN and IBM_CRN)
 
-# Reference job — anchored evidence
 REFERENCE_JOB = {
     "job_id": "d8uhvl4bp3hs738628cg",
     "backend": "ibm_kingston",
@@ -52,16 +53,25 @@ CACHE_TTL = int(os.environ.get("CHSH_CACHE_TTL", "3600"))
 
 def build_chsh_circuit(a_deg: float, b_deg: float) -> QuantumCircuit:
     """
-    Build the CHSH circuit for angles (a, b).
-    Mirrors the reference circuit structure: RZ-SX-RZ-CZ-...-measure.
+    Correct CHSH circuit for |Φ+> Bell state.
+    Alice measures at angle a, Bob at angle b (in degrees).
+    Basis rotation: Ry(-2θ) — the factor of -2 is critical.
     """
     qr = QuantumRegister(2, "q")
     cr = ClassicalRegister(2, "c")
     qc = QuantumCircuit(qr, cr)
+
+    # 1. Prepare |Φ+> = (|00> + |11>) / sqrt(2)
     qc.h(qr[0])
     qc.cx(qr[0], qr[1])
-    qc.ry(math.radians(a_deg), qr[0])
-    qc.ry(math.radians(b_deg), qr[1])
+
+    # 2. Alice's measurement basis rotation
+    qc.ry(-2 * math.radians(a_deg), qr[0])
+
+    # 3. Bob's measurement basis rotation
+    qc.ry(-2 * math.radians(b_deg), qr[1])
+
+    # 4. Measure both qubits
     qc.measure(qr[0], cr[0])
     qc.measure(qr[1], cr[1])
     return qc
@@ -80,7 +90,6 @@ def compute_correlation(counts: Dict[str, int]) -> float:
 
 
 def _run_chsh_on_ibm(shots: int) -> Dict[str, Any]:
-    """Submit 4 CHSH circuits to IBM Kingston (fresh job per endpoint call)."""
     service = QiskitRuntimeService(
         channel=IBM_CHANNEL,
         token=IBM_TOKEN,
@@ -89,7 +98,8 @@ def _run_chsh_on_ibm(shots: int) -> Dict[str, Any]:
     backend = service.backend(IBM_BACKEND)
     sampler = SamplerV2(mode=backend)
 
-    bases = [(0, 45), (0, -45), (90, 45), (90, -45)]
+    # Correct CHSH angles for maximum violation
+    bases = [(0, 22.5), (0, -22.5), (45, 22.5), (45, -22.5)]
     correlations = []
     job_ids = []
 
@@ -117,13 +127,14 @@ def _run_chsh_on_ibm(shots: int) -> Dict[str, Any]:
         "shots": shots,
         "correlations": [round(c, 4) for c in correlations],
         "hardware_verified": True,
+        "bases": bases,
     }
 
 
 def _run_chsh_on_aer(shots: int) -> Dict[str, Any]:
-    """Simulator fallback — Qiskit Aer."""
     sim = AerSimulator()
-    bases = [(0, 45), (0, -45), (90, 45), (90, -45)]
+    # Correct CHSH angles
+    bases = [(0, 22.5), (0, -22.5), (45, 22.5), (45, -22.5)]
     correlations = []
     for a, b in bases:
         qc = build_chsh_circuit(a, b)
@@ -143,11 +154,11 @@ def _run_chsh_on_aer(shots: int) -> Dict[str, Any]:
         "shots": shots,
         "correlations": [round(c, 4) for c in correlations],
         "hardware_verified": False,
+        "bases": bases,
     }
 
 
 def run_chsh(shots: int = 1024, force_fresh: bool = False) -> Dict[str, Any]:
-    """Main entry. Cached for CACHE_TTL."""
     now = time.time()
     if not force_fresh and _CACHE["S"] is not None and (now - _CACHE["timestamp"]) < CACHE_TTL:
         return dict(_CACHE)
@@ -186,7 +197,6 @@ def get_cached_chsh() -> Dict[str, Any]:
 
 
 def get_history() -> Dict[str, Any]:
-    """Historical jobs — anchored evidence."""
     return {"jobs": [REFERENCE_JOB]}
 
 
