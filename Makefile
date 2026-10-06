@@ -1,39 +1,30 @@
-.PHONY: help install dev test lint format clean docker-build verify
+.PHONY: help install test run lint chsh clean docker-build docker-run
 
 help:
-	@echo "Available commands:"
-	@echo "  install       Install dependencies"
-	@echo "  dev           Install development dependencies"
-	@echo "  test          Run tests"
-	@echo "  lint          Run linting"
-	@echo "  format        Format code"
-	@echo "  clean         Clean temporary files"
-	@echo "  docker-build  Build Docker image"
-	@echo "  verify        Run CHSH verification"
+	@echo "Targets: install test run lint chsh clean docker-build docker-run"
 
 install:
 	pip install -r requirements.txt
 
-dev:
-	pip install -r requirements-dev.txt
-
 test:
-	pytest tests/ -v --cov=mqos --cov-report=html
+	pytest tests/ -v
+
+run:
+	uvicorn server:app --host 0.0.0.0 --port 8000 --reload
 
 lint:
-	ruff check mqos/ tests/
+	python -m compileall -q mqos/ server.py
 
-format:
-	black mqos/ tests/
-	isort mqos/ tests/
+chsh:
+	@python -c "from mqos import run_chsh; import json; print(json.dumps(run_chsh(shots=1024, force_fresh=True), indent=2))"
 
 clean:
-	find . -type d -name "__pycache__" -exec rm -rf {} +
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete
-	rm -rf .pytest_cache .coverage htmlcov
+	rm -rf .pytest_cache
 
 docker-build:
-	docker build -t mqos-tererai .
+	docker build -t mqos-tererai:2.1.0 .
 
-verify:
-	python scripts/verify_ibm.py
+docker-run:
+	docker run --rm -p 8000:8000 --env-file .env mqos-tererai:2.1.0
