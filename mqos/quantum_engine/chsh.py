@@ -97,6 +97,8 @@ def build_chsh_circuit(a_deg: float, b_deg: float) -> QuantumCircuit:
     qc.ry(-2 * math.radians(b_deg), qr[1])
 
     # Step 4 — Measure both qubits
+    # Qiskit returns bitstrings with cr[N-1]...cr[0] ordering.
+    # We keep circuit order as-is and normalize in compute_correlation.
     qc.measure(qr[0], cr[0])
     qc.measure(qr[1], cr[1])
     return qc
@@ -105,14 +107,22 @@ def build_chsh_circuit(a_deg: float, b_deg: float) -> QuantumCircuit:
 def compute_correlation(counts: Dict[str, int]) -> float:
     """
     E(a, b) = P(00) + P(11) - P(01) - P(10)
+
+    Qiskit returns bitstring keys with the LEFT-most character being the
+    HIGHEST-index classical bit (cr[N-1] ... cr[0]). We normalize by
+    reversing so that the left-most character is cr[0] (Alice's result).
     """
-    total = sum(counts.values())
+    # Normalize bitstring order: cr[1]cr[0] → cr[0]cr[1]
+    normalized: Dict[str, int] = {k[::-1]: v for k, v in counts.items()}
+
+    total = sum(normalized.values())
     if total == 0:
         return 0.0
-    e00 = counts.get("00", 0) / total
-    e11 = counts.get("11", 0) / total
-    e01 = counts.get("01", 0) / total
-    e10 = counts.get("10", 0) / total
+
+    e00 = normalized.get("00", 0) / total
+    e11 = normalized.get("11", 0) / total
+    e01 = normalized.get("01", 0) / total
+    e10 = normalized.get("10", 0) / total
     return e00 + e11 - e01 - e10
 
 
