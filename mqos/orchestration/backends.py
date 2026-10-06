@@ -1,13 +1,8 @@
-"""
-Backend registry — queries IBM Quantum live.
-Provides: get_backend_status(), list_available_backends()
-"""
+"""Live IBM Quantum backend registry."""
 
 import os
 import time
 from typing import Dict, Any, List
-
-from qiskit_aer import AerSimulator
 
 try:
     from qiskit_ibm_runtime import QiskitRuntimeService
@@ -24,7 +19,7 @@ CACHE_TTL = 300
 
 
 def get_backend_status() -> Dict[str, Any]:
-    """Query real backend status — cached 5 minutes."""
+    """Query live backend status. Cached for 5 minutes."""
     now = time.time()
     if _CACHE["data"] and (now - _CACHE["timestamp"]) < CACHE_TTL:
         return _CACHE["data"]
@@ -63,11 +58,10 @@ def get_backend_status() -> Dict[str, Any]:
     else:
         status["ibm_unconfigured"] = {
             "status": "not_configured",
-            "note": "Set IBM_QUANTUM_TOKEN and IBM_QUANTUM_CRN",
+            "note": "Set IBM_QUANTUM_TOKEN and IBM_QUANTUM_CRN to enable",
             "provider": "IBM Quantum",
         }
 
-    # Qiskit Aer always available
     status["qiskit_aer"] = {
         "status": "online",
         "qubits": "unlimited (simulator)",
@@ -81,5 +75,5 @@ def get_backend_status() -> Dict[str, Any]:
 
 
 def list_available_backends() -> List[str]:
-    """Return backend names available."""
+    """Return names of all available backends."""
     return list(get_backend_status().keys())
