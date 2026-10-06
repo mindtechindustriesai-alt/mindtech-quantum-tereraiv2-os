@@ -1,5 +1,10 @@
 """QKD status — Ekert91 protocol."""
-def qkd_status() -> dict:
+
+from typing import Dict, Any
+
+
+def qkd_status() -> Dict[str, Any]:
+    """Report the Ekert91 QKD subsystem status."""
     return {
         "protocol": "Ekert91",
         "status": "available",
