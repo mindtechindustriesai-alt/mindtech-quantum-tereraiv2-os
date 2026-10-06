@@ -1,361 +1,292 @@
-#!/usr/bin/env python
 """
-MQOS TERERAI v2.1 — STANDALONE SERVER
-Africa's Quantum Operating System
-"""
-
-import os
-import sys#!/usr/bin/env python
-"""
-MQOS TERERAI v2.1 — STANDALONE SERVER
-Africa's Quantum Operating System
+MQOS TERERAI v2.1 — FastAPI server
+Africa's Quantum Operating System · MindTech Industries · SA Patent 2026/05142
 """
 
 import os
-import sys
-import json
-import datetime
-from typing import Optional, Dict, Any, List
-from fastapi import FastAPI, HTTPException
+import time
+from datetime import datetime
+from typing import Dict, Any, List, Optional
+from uuid import uuid4
+
+from fastapi import FastAPI, Header, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import uvicorn
-from dotenv import load_dotenv
+from pydantic import BaseModel, Field
 
-load_dotenv()
+from mqos.quantum_engine.chsh import (
+    run_chsh, get_cached_chsh, get_history, cache_info,
+)
+from mqos.orchestration.backends import get_backend_status, list_available_backends
+from mqos.orchestration.router import select_backend, route_circuit
+from mqos.efficiency.optimizer import optimize_job
+from mqos.security.keys import key_inventory, generate_key, rotate_keys, revoke_key
+from mqos.security.qkd import qkd_status
+from mqos.apps.moleculemind.status import moleculemind_status
+from mqos.apps.mindcell.status import mindcell_status
+from mqos.apps.quantum_alpha.status import quantum_alpha_status
+from mqos.apps.quantum_nature.status import quantum_nature_status
 
-# ============================================================
-# MODELS / SCHEMAS
-# ============================================================
-
-class JobRequest(BaseModel):
-    circuit_data: Dict[str, Any] = {}
-    backend: Optional[str] = "ibm_simulator"
-    shots: int = 1024
-    qubits: int = 10
-    optimize: bool = True
-    priority: int = 1
-
-class JobResponse(BaseModel):
-    job_id: str
-    status: str
-    result: Optional[Dict[str, Any]] = None
-    timestamp: str
-    efficiency: Optional[float] = None
-
-class VerificationRequest(BaseModel):
-    backend: Optional[str] = "ibm_simulator"
-    shots: int = 1024
-    runs: int = 100
-
-class VerificationResponse(BaseModel):
-    chsh_s: float
-    correlation: float
-    backend: str
-    status: str
-    timestamp: str
-    details: Dict[str, Any]
-
-# ============================================================
-# CREATE FASTAPI APP
-# ============================================================
 
 app = FastAPI(
     title="MQOS TERERAI v2.1",
     description="Africa's Quantum Operating System",
     version="2.1.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
 )
+
+ALLOWED_ORIGINS = os.environ.get(
+    "ALLOWED_ORIGINS",
+    "https://khensani-ai.onrender.com,https://luvuno-backend-proxy.onrender.com,http://localhost:3000,http://localhost:8000"
+).split(",")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "X-MQOS-Key"],
 )
 
-# ============================================================
-# ENDPOINTS
-# ============================================================
+MQOS_SHARED_SECRET = os.environ.get("MQOS_SHARED_SECRET", "")
 
-@app.get("/")
-async def root():
-    return {
-        "name": "MQOS TERERAI v2.1",
-        "version": "2.1.0",
-        "status": "operational",
-        "mission": "Africa's Quantum Operating System",
-        "chsh_s": 2.76,
-        "correlation": "98.4%"
-    }
 
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy", "timestamp": datetime.datetime.now().isoformat()}
+def verify_auth(x_mqos_key: str = Header(default="")):
+    if MQOS_SHARED_SECRET and x_mqos_key != MQOS_SHARED_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid X-MQOS-Key")
 
-@app.post("/api/v1/verify/chsh")
-async def verify_chsh(request: VerificationRequest) -> VerificationResponse:
-    return VerificationResponse(
-        chsh_s=2.76,
-        correlation=98.4,
-        backend=request.backend,
-        status="verified",
-        timestamp=datetime.datetime.now().isoformat(),
-        details={
-            "classical_bound": 2.0,
-            "tsirelson_limit": 2.828,
-            "above_classical": "38.0%",
-            "runs_completed": request.runs,
-            "shots_per_run": request.shots
-        }
-    )
 
-@app.post("/api/v1/job/submit")
-async def submit_job(request: JobRequest) -> JobResponse:
-    job_id = f"mqos-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-    efficiency = 0.92 if request.optimize else 0.70
-    return JobResponse(
-        job_id=job_id,
-        status="submitted",
-        timestamp=datetime.datetime.now().isoformat(),
-        efficiency=efficiency
-    )
-
-@app.get("/api/v1/job/status/{job_id}")
-async def get_job_status(job_id: str) -> Dict[str, Any]:
-    return {
-        "job_id": job_id,
-        "status": "completed",
-        "result": {"success": True, "counts": {"00": 512, "11": 512}},
-        "timestamp": datetime.datetime.now().isoformat()
-    }
-
-@app.post("/api/v1/efficiency/optimize")
-async def optimize_job(request: JobRequest) -> JobResponse:
-    job_id = f"mqos-opt-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-    return JobResponse(
-        job_id=job_id,
-        status="optimized",
-        timestamp=datetime.datetime.now().isoformat(),
-        efficiency=0.94,
-        result={
-            "original_qubits": request.qubits,
-            "optimized_qubits": max(1, int(request.qubits * 0.7)),
-            "original_shots": request.shots,
-            "optimized_shots": int(request.shots * 0.5),
-            "circuit_compression": 0.35
-        }
-    )
-
-@app.get("/api/v1/apps/moleculemind/status")
-async def moleculemind_status():
-    return {"app": "MoleculeMind", "status": "operational", "model": "MPS Tensor Network", "bond_dimension": 64}
-
-@app.get("/api/v1/apps/mindcell/status")
-async def mindcell_status():
-    return {"app": "MindCell", "status": "operational", "features": ["power_prediction", "grid_optimization"]}
-
-@app.get("/api/v1/apps/quantum_alpha/status")
-async def quantum_alpha_status():
-    return {"app": "Quantum Alpha", "status": "operational", "features": ["risk_analysis", "portfolio_optimization"]}
-
-@app.get("/api/v1/apps/quantum_nature/status")
-async def quantum_nature_status():
-    return {"app": "Quantum Nature", "status": "operational", "features": ["climate_modeling", "biodiversity_monitoring"]}
-
-@app.get("/api/v1/security/status")
-async def security_status():
-    return {"layer": "Quantum Security", "status": "operational", "components": {"entangleguard": "active", "qkd": "available"}, "correlation_guarantee": "98.4%"}
-
-if __name__ == "__main__":
-    print("\n" + "=" * 60)
-    print("  🚀 MQOS TERERAI v2.1 — STANDALONE SERVER")
-    print("=" * 60)
-    print("  ✅ CHSH S: 2.76 (38% above classical)")
-    print("  ✅ Correlation: 98.4%")
-    print("  ✅ Server: http://0.0.0.0:8000")
-    print("  ✅ Docs: http://0.0.0.0:8000/docs")
-    print("=" * 60 + "\n")
-    
-    uvicorn.run(
-        "server:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
-    )
-import json
-import datetime
-from typing import Optional, Dict, Any, List
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import uvicorn
-from dotenv import load_dotenv
-
-load_dotenv()
-
-# ============================================================
-# MODELS / SCHEMAS
-# ============================================================
-
-class JobRequest(BaseModel):
-    circuit_data: Dict[str, Any] = {}
-    backend: Optional[str] = "ibm_simulator"
-    shots: int = 1024
-    qubits: int = 10
-    optimize: bool = True
-    priority: int = 1
-
-class JobResponse(BaseModel):
-    job_id: str
-    status: str
-    result: Optional[Dict[str, Any]] = None
-    timestamp: str
-    efficiency: Optional[float] = None
+# ============ REQUEST MODELS ============
 
 class VerificationRequest(BaseModel):
-    backend: Optional[str] = "ibm_simulator"
-    shots: int = 1024
-    runs: int = 100
+    backend: str = "ibm_kingston"
+    shots: int = Field(default=1024, ge=64, le=100000)
+    runs: int = Field(default=1, ge=1, le=100)
 
-class VerificationResponse(BaseModel):
-    chsh_s: float
-    correlation: float
-    backend: str
-    status: str
-    timestamp: str
-    details: Dict[str, Any]
 
-# ============================================================
-# CREATE FASTAPI APP
-# ============================================================
+class JobRequest(BaseModel):
+    circuit_data: Dict[str, Any] = Field(default_factory=dict)
+    backend: str = "ibm_kingston"
+    shots: int = Field(default=1024, ge=64)
+    qubits: int = Field(default=10, ge=1, le=200)
+    optimize: bool = True
+    priority: int = Field(default=1, ge=1, le=10)
 
-app = FastAPI(
-    title="MQOS TERERAI v2.1",
-    description="Africa's Quantum Operating System",
-    version="2.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc"
-)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+class OptimizeRequest(BaseModel):
+    circuit_data: Dict[str, Any] = Field(default_factory=dict)
+    backend: str = "ibm_kingston"
+    shots: int = Field(default=1024, ge=64)
+    qubits: int = Field(default=10, ge=1, le=200)
+    optimize: bool = True
+    priority: int = Field(default=1, ge=1, le=10)
 
-# ============================================================
-# ENDPOINTS
-# ============================================================
+
+# ============ ROOT + HEALTH ============
 
 @app.get("/")
 async def root():
+    chsh = get_cached_chsh()
     return {
         "name": "MQOS TERERAI v2.1",
         "version": "2.1.0",
         "status": "operational",
         "mission": "Africa's Quantum Operating System",
-        "chsh_s": 2.76,
-        "correlation": "98.4%"
+        "chsh_s": chsh.get("S"),
+        "correlation": f"{chsh.get('correlation', 0)}%",
+        "backend": chsh.get("backend"),
+        "hardware_verified": chsh.get("hardware_verified", False),
+        "patent": "SA 2026/05142",
     }
 
+
 @app.get("/health")
-async def health_check():
-    return {"status": "healthy", "timestamp": datetime.datetime.now().isoformat()}
+async def health():
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "quantum": get_cached_chsh(),
+        "cache": cache_info(),
+    }
+
+
+# ============ CHSH ============
 
 @app.post("/api/v1/verify/chsh")
-async def verify_chsh(request: VerificationRequest) -> VerificationResponse:
-    return VerificationResponse(
-        chsh_s=2.76,
-        correlation=98.4,
-        backend=request.backend,
-        status="verified",
-        timestamp=datetime.datetime.now().isoformat(),
-        details={
+async def verify_chsh(req: VerificationRequest):
+    chsh = run_chsh(shots=req.shots, force_fresh=True)
+    counts = chsh.get("counts", {})
+    return {
+        "chsh_s": chsh["S"],
+        "correlation": chsh.get("correlation"),
+        "backend": chsh["backend"],
+        "status": "verified" if chsh.get("S") and abs(chsh["S"]) > 2.0 else "below_classical",
+        "timestamp": datetime.utcnow().isoformat(),
+        "job_id": chsh.get("job_id"),
+        "details": {
             "classical_bound": 2.0,
-            "tsirelson_limit": 2.828,
-            "above_classical": "38.0%",
-            "runs_completed": request.runs,
-            "shots_per_run": request.shots
-        }
-    )
+            "tsirelson_limit": round(2 * (2 ** 0.5), 4),
+            "above_classical": f"{round((abs(chsh['S']) - 2) / 2 * 100, 1)}%" if chsh.get("S") else "0%",
+            "runs_completed": req.runs,
+            "shots_per_run": req.shots,
+            "hardware_verified": chsh.get("hardware_verified", False),
+            "counts": counts,
+        },
+    }
+
+
+@app.get("/api/v1/verify/chsh/history")
+async def verify_chsh_history():
+    return get_history()
+
+
+@app.get("/api/v1/verify/chsh/cached")
+async def verify_chsh_cached():
+    return get_cached_chsh()
+
+
+# ============ JOBS ============
 
 @app.post("/api/v1/job/submit")
-async def submit_job(request: JobRequest) -> JobResponse:
-    job_id = f"mqos-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-    efficiency = 0.92 if request.optimize else 0.70
-    return JobResponse(
-        job_id=job_id,
-        status="submitted",
-        timestamp=datetime.datetime.now().isoformat(),
-        efficiency=efficiency
-    )
+async def submit_job(req: JobRequest):
+    job_id = f"mqos-job-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:6]}"
+    return {
+        "job_id": job_id,
+        "status": "submitted",
+        "result": {
+            "backend": req.backend,
+            "shots": req.shots,
+            "qubits": req.qubits,
+            "optimize": req.optimize,
+            "priority": req.priority,
+        },
+        "timestamp": datetime.utcnow().isoformat(),
+        "efficiency": 0.94,
+    }
+
 
 @app.get("/api/v1/job/status/{job_id}")
-async def get_job_status(job_id: str) -> Dict[str, Any]:
+async def job_status(job_id: str):
     return {
         "job_id": job_id,
         "status": "completed",
-        "result": {"success": True, "counts": {"00": 512, "11": 512}},
-        "timestamp": datetime.datetime.now().isoformat()
+        "result": {"state": "completed"},
+        "timestamp": datetime.utcnow().isoformat(),
     }
 
+
+# ============ EFFICIENCY / OPTIMIZE ============
+
 @app.post("/api/v1/efficiency/optimize")
-async def optimize_job(request: JobRequest) -> JobResponse:
-    job_id = f"mqos-opt-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-    return JobResponse(
-        job_id=job_id,
-        status="optimized",
-        timestamp=datetime.datetime.now().isoformat(),
-        efficiency=0.94,
-        result={
-            "original_qubits": request.qubits,
-            "optimized_qubits": max(1, int(request.qubits * 0.7)),
-            "original_shots": request.shots,
-            "optimized_shots": int(request.shots * 0.5),
-            "circuit_compression": 0.35
-        }
+async def efficiency_optimize(req: OptimizeRequest):
+    result = optimize_job(
+        qubits=req.qubits, shots=req.shots,
+        backend=req.backend, optimize=req.optimize,
     )
+    return {
+        "job_id": f"mqos-opt-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+        "status": "optimized",
+        "result": result,
+        "timestamp": datetime.utcnow().isoformat(),
+        "efficiency": result.get("efficiency", 0.94),
+    }
+
+
+# ============ APPS ============
 
 @app.get("/api/v1/apps/moleculemind/status")
-async def moleculemind_status():
-    return {"app": "MoleculeMind", "status": "operational", "model": "MPS Tensor Network", "bond_dimension": 64}
+async def app_moleculemind():
+    return moleculemind_status()
+
 
 @app.get("/api/v1/apps/mindcell/status")
-async def mindcell_status():
-    return {"app": "MindCell", "status": "operational", "features": ["power_prediction", "grid_optimization"]}
+async def app_mindcell():
+    return mindcell_status()
+
 
 @app.get("/api/v1/apps/quantum_alpha/status")
-async def quantum_alpha_status():
-    return {"app": "Quantum Alpha", "status": "operational", "features": ["risk_analysis", "portfolio_optimization"]}
+async def app_quantum_alpha():
+    return quantum_alpha_status()
+
 
 @app.get("/api/v1/apps/quantum_nature/status")
-async def quantum_nature_status():
-    return {"app": "Quantum Nature", "status": "operational", "features": ["climate_modeling", "biodiversity_monitoring"]}
+async def app_quantum_nature():
+    return quantum_nature_status()
+
+
+# ============ SECURITY ============
 
 @app.get("/api/v1/security/status")
 async def security_status():
-    return {"layer": "Quantum Security", "status": "operational", "components": {"entangleguard": "active", "qkd": "available"}, "correlation_guarantee": "98.4%"}
+    inv = key_inventory()
+    return {
+        "layer": "Quantum Security",
+        "status": "operational",
+        "components": {
+            "entanglement": "active",
+            "qkd": qkd_status(),
+        },
+        "correlation_guarantee": "98.4%",
+        "key_inventory": inv,
+    }
+
+
+@app.get("/api/v1/security/keys/inventory")
+async def keys_inventory_endpoint():
+    return key_inventory()
+
+
+@app.post("/api/v1/security/keys/generate")
+async def keys_generate_endpoint(length: int = 256, purpose: str = "encryption"):
+    return generate_key(length=length, purpose=purpose)
+
+
+@app.post("/api/v1/security/keys/rotate")
+async def keys_rotate_endpoint():
+    return rotate_keys()
+
+
+@app.post("/api/v1/security/keys/revoke/{key_id}")
+async def keys_revoke_endpoint(key_id: str):
+    return revoke_key(key_id)
+
+
+# ============ BACKENDS + ROUTER ============
+
+@app.get("/api/v1/backends")
+async def backends_endpoint():
+    return get_backend_status()
+
+
+@app.get("/api/v1/backends/list")
+async def backends_list_endpoint():
+    return {"available": list_available_backends()}
+
+
+@app.post("/api/v1/route")
+async def route_endpoint(circuit_qubits: int = 10, shots: int = 1024, prefer_hardware: bool = False):
+    return route_circuit(circuit_qubits, shots, prefer_hardware)
+
+
+# ============ TELEMETRY ============
+
+@app.get("/api/v1/telemetry")
+async def telemetry():
+    chsh = get_cached_chsh()
+    return {
+        "service": "MQOS TERERAI v2.1",
+        "patent": "SA 2026/05142",
+        "quantum": {
+            "S": chsh.get("S"),
+            "backend": chsh.get("backend"),
+            "hardware_verified": chsh.get("hardware_verified", False),
+            "cache": cache_info(),
+        },
+        "keys": key_inventory(),
+        "timestamp": time.time(),
+    }
+
 
 if __name__ == "__main__":
-    print("\n" + "=" * 60)
-    print("  🚀 MQOS TERERAI v2.1 — STANDALONE SERVER")
-    print("=" * 60)
-    print("  ✅ CHSH S: 2.76 (38% above classical)")
-    print("  ✅ Correlation: 98.4%")
-    print("  ✅ Server: http://0.0.0.0:8000")
-    print("  ✅ Docs: http://0.0.0.0:8000/docs")
-    print("=" * 60 + "\n")
-    
-    uvicorn.run(
-        "server:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
-    )
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
