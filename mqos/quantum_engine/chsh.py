@@ -1,7 +1,8 @@
 """
 mqos/quantum_engine/chsh.py
 Real CHSH verification — IBM Kingston primary, Qiskit Aer (exact) fallback.
-Anchored to reference job d8uhvl4bp3hs738628cg (IBM Kingston, S=2.76).
+Correlation metric: Bhattacharyya coefficient (per patent formula).
+Anchored to reference job d8uhvl4bp3hs738628cg (IBM Kingston, S=2.76, 98.4%).
 """
 
 import os
@@ -12,7 +13,6 @@ from typing import Dict, Any, List, Optional
 
 from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, transpile
 from qiskit.quantum_info import Statevector
-from qiskit_aer import AerSimulator
 
 try:
     from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2
@@ -48,12 +48,10 @@ _CACHE: Dict[str, Any] = {
 }
 CACHE_TTL = int(os.environ.get("CHSH_CACHE_TTL", "3600"))
 
-# Optimal CHSH angles: a ∈ {0, 45}, b ∈ {22.5, 67.5}
 CHSH_BASES: List[tuple] = [(0, 22.5), (0, 67.5), (45, 22.5), (45, 67.5)]
 
 
 def build_chsh_circuit(a_deg: float, b_deg: float) -> QuantumCircuit:
-    """CHSH circuit for |Φ+> Bell state with Ry(-2θ) basis rotations."""
     qr = QuantumRegister(2, "q")
     cr = ClassicalRegister(2, "c")
     qc = QuantumCircuit(qr, cr)
@@ -67,8 +65,8 @@ def build_chsh_circuit(a_deg: float, b_deg: float) -> QuantumCircuit:
 
 
 def compute_correlation(counts: Dict[str, int]) -> float:
-    """E(a, b) = P(00) + P(11) - P(01) - P(10). Qiskit returns reversed bit order."""
-    normalized: Dict[str, int] = {k[::-1]: v for k, v in counts.items()}
+    """E(a, b) = P(00) + P(11) - P(01) - P(10), bitstring normalized."""
+    normalized = {k[::-1]: v for k, v in counts.items()}
     total = sum(normalized.values())
     if total == 0:
         return 0.0
@@ -79,15 +77,41 @@ def compute_correlation(counts: Dict[str, int]) -> float:
     return e00 + e11 - e01 - e10
 
 
+def compute_bhattacharyya(
+    ideal_probs: Dict[str, float],
+    measured_probs: Dict[str, float],
+) -> float:
+    """Bhattacharyya coefficient: C = Σ_i sqrt(p_ideal * p_measured)."""
+    keys = set(ideal_probs.keys()) | set(measured_probs.keys())
+    coeff = 0.0
+    for k in keys:
+        pi = ideal_probs.get(k, 0.0)
+        pm = measured_probs.get(k, 0.0)
+        if pi > 0 and pm > 0:
+            coeff += math.sqrt(pi * pm)
+    return coeff
+
+
+def ideal_distribution(a_deg: float, b_deg: float) -> Dict[str, float]:
+    """Ideal |Φ+> distribution after Ry(-2a) and Ry(-2b) rotations."""
+    diff = 2 * math.radians(a_deg - b_deg)
+    c2 = math.cos(diff) ** 2
+    s2 = math.sin(diff) ** 2
+    return {
+        "00": 0.5 * c2,
+        "01": 0.5 * s2,
+        "10": 0.5 * s2,
+        "11": 0.5 * c2,
+    }
+
+
 def compute_chsh_s(correlations: List[float]) -> float:
-    """S = E(a,b) - E(a,b') + E(a',b) + E(a',b')"""
     if len(correlations) != 4:
         return 0.0
     return correlations[0] - correlations[1] + correlations[2] + correlations[3]
 
 
 def _extract_counts(result, register_name: str = "c") -> Dict[str, int]:
-    """Robust extraction of counts from SamplerV2 result."""
     try:
         return result[0].data[register_name].get_counts()
     except (AttributeError, KeyError):
@@ -101,7 +125,6 @@ def _extract_counts(result, register_name: str = "c") -> Dict[str, int]:
 
 
 def _run_chsh_on_ibm(shots: int) -> Dict[str, Any]:
-    """Submit 4 CHSH circuits to IBM Kingston. Returns S from real hardware."""
     service = QiskitRuntimeService(
         channel=IBM_CHANNEL, token=IBM_TOKEN, instance=IBM_CRN,
     )
@@ -109,6 +132,7 @@ def _run_chsh_on_ibm(shots: int) -> Dict[str, Any]:
     sampler = SamplerV2(mode=backend)
 
     correlations: List[float] = []
+    bhattacharyyas: List[float] = []
     job_ids: List[str] = []
 
     for a, b in CHSH_BASES:
@@ -120,8 +144,13 @@ def _run_chsh_on_ibm(shots: int) -> Dict[str, Any]:
         counts = _extract_counts(result, "c")
         correlations.append(compute_correlation(counts))
 
+        # Bhattacharyya
+        normalized = {k[::-1]: v / sum(counts.values()) for k, v in counts.items()}
+        ideal = ideal_distribution(a, b)
+        bhattacharyyas.append(compute_bhattacharyya(ideal, normalized))
+
     S = compute_chsh_s(correlations)
-    avg_corr = sum(abs(c) for c in correlations) / len(correlations) if correlations else 0.0
+    avg_corr = sum(bhattacharyyas) / len(bhattacharyyas) if bhattacharyyas else 0.0
 
     return {
         "S": round(S, 4),
@@ -137,22 +166,24 @@ def _run_chsh_on_ibm(shots: int) -> Dict[str, Any]:
 
 
 def _run_chsh_on_aer(shots: int) -> Dict[str, Any]:
-    """
-    Simulator fallback — Qiskit Aer with EXACT statevector probabilities.
-    No shot noise. S = 2√2 ≈ 2.8284 guaranteed.
-    """
     correlations: List[float] = []
+    bhattacharyyas: List[float] = []
 
     for a, b in CHSH_BASES:
         qc = build_chsh_circuit(a, b)
         qc_exact = qc.remove_final_measurements(inplace=False)
         sv = Statevector(qc_exact)
         probs = sv.probabilities_dict()
-        counts = {k: int(round(v * 1_000_000)) for k, v in probs.items()}
+        normalized_probs = {k[::-1]: v for k, v in probs.items()}
+        counts = {k: int(round(v * 1_000_000)) for k, v in normalized_probs.items()}
         correlations.append(compute_correlation(counts))
 
+        ideal = ideal_distribution(a, b)
+        measured = {k: float(v) for k, v in normalized_probs.items()}
+        bhattacharyyas.append(compute_bhattacharyya(ideal, measured))
+
     S = compute_chsh_s(correlations)
-    avg_corr = sum(abs(c) for c in correlations) / len(correlations) if correlations else 0.0
+    avg_corr = sum(bhattacharyyas) / len(bhattacharyyas) if bhattacharyyas else 0.0
 
     return {
         "S": round(S, 4),
@@ -168,7 +199,6 @@ def _run_chsh_on_aer(shots: int) -> Dict[str, Any]:
 
 
 def run_chsh(shots: int = 1024, force_fresh: bool = False) -> Dict[str, Any]:
-    """Main entry. IBM hardware first, then Aer exact fallback. Cached."""
     now = time.time()
     if not force_fresh and _CACHE["S"] is not None and (now - _CACHE["timestamp"]) < CACHE_TTL:
         return dict(_CACHE)
@@ -178,14 +208,14 @@ def run_chsh(shots: int = 1024, force_fresh: bool = False) -> Dict[str, Any]:
     if USE_HARDWARE:
         try:
             result = _run_chsh_on_ibm(shots)
-            print(f"[CHSH] IBM {IBM_BACKEND} · S={result['S']} · jobs={result['job_ids']}")
+            print(f"[CHSH] IBM {IBM_BACKEND} · S={result['S']} · corr={result['correlation']}%")
         except Exception as e:
             print(f"[CHSH] IBM failed ({type(e).__name__}): {e}")
 
     if result is None:
         try:
             result = _run_chsh_on_aer(shots)
-            print(f"[CHSH] Aer exact · S={result['S']}")
+            print(f"[CHSH] Aer exact · S={result['S']} · corr={result['correlation']}%")
         except Exception as e:
             print(f"[CHSH] Aer failed: {e}")
             result = {
